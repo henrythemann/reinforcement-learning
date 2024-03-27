@@ -4,31 +4,28 @@ import matplotlib.pyplot as plt
 import time
 import datetime
 import curses
-from tqdm.notebook import trange
-from scipy.spatial.distance import cdist
 import numpy as np
-from numpy.typing import NDArray
-
 from curses_stuff import draw_grid
 
 map = [
-    ['O', 'O', 'O', 'O', 'O', 'O', 'O', 'X'],
+    ['O', 'O', 'O', 'O', 'X', 'O', 'O', 'X'],
     ['O', 'O', 'O', 'O', 'O', 'O', 'O', 'O'],
-    ['O', 'O', 'X', 'O', 'O', 'O', 'O', 'O'],
-    ['O', 'O', 'O', 'O', 'O', 'O', 'O', 'O'],
-    ['O', 'O', 'O', 'O', 'X', 'O', 'O', 'O'],
-    ['O', 'O', 'O', 'O', 'O', 'O', 'O', 'O'],
-    ['O', 'O', 'O', 'O', 'O', 'O', 'O', 'O'],
+    ['O', 'X', 'X', 'X', 'X', 'O', 'O', 'O'],
+    ['X', 'O', 'O', 'O', 'O', 'O', 'O', 'O'],
+    ['X', 'O', 'X', 'X', 'X', 'X', 'X', 'O'],
+    ['O', 'O', 'O', 'O', 'O', 'O', 'X', 'O'],
+    ['O', 'O', 'O', 'O', 'O', 'O', 'X', 'X'],
     ['O', 'O', 'O', 'O', 'O', 'O', 'O', 'O'],
     ]
-
+VISUALIZATION = False
 goal = (7, 7)
 start = (0, 0)
-min_epsilon = 0.1 #probability of exploration action
-learning_rate = 0.1
-decay_rate = 0.0005
-gamma = 0.95
-shaping_factor = .1
+min_epsilon = 0.1 # higher values set a higher floor for the probability of the agent choosing a random action
+learning_rate = 0.1 # higher values make the agent more likely to update its Q-table with new information
+decay_rate = .0001 # higher values make the epsilon curve sharper, decreasing faster, leading to less exploration quicker
+gamma = 0.95 # higher values make the agent more likely to choose actions that lead to higher rewards
+shaping_factor = .01 # higher values give the agent higher reward for choosing a spot closer to the goal
+num_iterations = 3_000
 
 # rows = state for all possible squares in the grid
 # cols = the four actions (up, down, left, right)
@@ -76,34 +73,57 @@ def state_to_pos(state):
 def pos_to_state(pos):
     return pos[0] * 8 + pos[1]
 
+def final_run(q_table):
+    state = pos_to_state(start)
+    step_count = 0
+    while state != pos_to_state(goal):
+        if step_count > 100:
+            print("Agent couldn't reach goal")
+            return
+        step_count += 1
+        action = np.argmax(q_table[state])
+        _, state = update_state(state, action)
+    print(f"Final run took {step_count} steps")
+
 def main(stdscr):
+    start_time = datetime.datetime.now()
+    figure, axes = plt.subplots(2, 1)
     state = pos_to_state(start)
     map[goal[0]][goal[1]] = 'G'
-    num_iterations = 3_000
-    figure, axes = plt.subplots(2, 1)
+    if VISUALIZATION:
+        curses.curs_set(0)  # Hide the cursor
     steps_to_goal = 0
-    curses.curs_set(0)  # Hide the cursor
     for i in range(num_iterations):
-        # draw_grid(stdscr, map, state_to_pos(state))
+        # print(i, end='\r')
+        if VISUALIZATION:
+            draw_grid(stdscr, map, state_to_pos(state))
         epsilon = min_epsilon + (1 - min_epsilon) * np.exp(-decay_rate * i)
         action = epsilon_greedy(epsilon, q_table, state)
         reward, new_state = update_state(state, action)
         q_table[state, action] = q_table[state, action] + learning_rate * (reward + gamma * q_table[new_state].max() - q_table[state, action])
-        if new_state == 63:
-            state = 0
+        if new_state == pos_to_state(goal):
             axes[1].scatter(i, steps_to_goal)
+            state = 0
             steps_to_goal = 0
         else:
             state = new_state
+            steps_to_goal += 1
+        if VISUALIZATION:
+            time.sleep(.01)
         axes[0].scatter(i, reward)
-        steps_to_goal += 1
-        # time.sleep(.01)
+    print(f"Training took {datetime.datetime.now()-start_time}")
+    final_run(q_table)
     axes[0].set_xlabel("Iterations")
     axes[0].set_ylabel("Reward")
+    axes[0].set_xlim(0, num_iterations)
     axes[0].set_ylim(-1, 1)
     axes[1].set_xlabel("Iterations")
     axes[1].set_ylabel("Steps to goal")
-    axes[1].set_xlim(0, 3000)
+    axes[1].set_xlim(0, num_iterations)
     plt.tight_layout()
     plt.show()
-curses.wrapper(main)
+
+if VISUALIZATION:
+    curses.wrapper(main)
+else:
+    main(None)
